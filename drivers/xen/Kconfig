@@ -1,0 +1,324 @@
+menu "Xen driver support"
+	depends on XEN
+
+config XEN_BALLOON
+	bool "Xen memory balloon driver"
+	default y
+	help
+	  The balloon driver allows the Xen domain to request more memory from
+	  the system to expand the domain's memory allocation, or alternatively
+	  return unneeded memory to the system.
+
+config XEN_SELFBALLOONING
+	bool "Dynamically self-balloon kernel memory to target"
+	depends on XEN_BALLOON && CLEANCACHE && SWAP && XEN_TMEM
+	help
+	  Self-ballooning dynamically balloons available kernel memory driven
+	  by the current usage of anonymous memory ("committed AS") and
+	  controlled by various sysfs-settable parameters.  Configuring
+	  FRONTSWAP is highly recommended; if it is not configured, self-
+	  ballooning is disabled by default but can be enabled with the
+	  'selfballooning' kernel boot parameter.  If FRONTSWAP is configured,
+	  frontswap-selfshrinking is enabled by default but can be disabled
+	  with the 'noselfshrink' kernel boot parameter; and self-ballooning
+	  is enabled by default but can be disabled with the 'noselfballooning'
+	  kernel boot parameter.  Note that systems without a sufficiently
+	  large swap device should not enable self-ballooning.
+
+config XEN_BALLOON_MEMORY_HOTPLUG
+	bool "Memory hotplug support for Xen balloon driver"
+	default n
+	depends on PARAVIRT_XEN && XEN_BALLOON && MEMORY_HOTPLUG
+	help
+	  Memory hotplug support for Xen balloon driver allows expanding memory
+	  available for the system above limit declared at system startup.
+	  It is very useful on critical systems which require long
+	  run without rebooting.
+
+	  Memory could be hotplugged in following steps:
+
+	    1) dom0: xl mem-max <domU> <maxmem>
+	       where <maxmem> is >= requested memory size,
+
+	    2) dom0: xl mem-set <domU> <memory>
+	       where <memory> is requested memory size; alternatively memory
+	       could be added by writing proper value to
+	       /sys/devices/system/xen_memory/xen_memory0/target or
+	       /sys/devices/system/xen_memory/xen_memory0/target_kb on dumU,
+
+	    3) domU: for i in /sys/devices/system/memory/memory*/state; do \
+	               [ "`cat "$i"`" = offline ] && echo online > "$i"; done
+
+	  Memory could be onlined automatically on domU by adding following line to udev rules:
+
+	  SUBSYSTEM=="memory", ACTION=="add", RUN+="/bin/sh -c '[ -f /sys$devpath/state ] && echo online > /sys$devpath/state'"
+
+	  In that case step 3 should be omitted.
+
+config XEN_SCRUB_PAGES
+	bool "Scrub memory before freeing it to Xen"
+	depends on XEN || XEN_BALLOON
+	default y
+	help
+	  Erase memory contents before freeing it back to Xen's global
+	  pool. This ensures that any secrets contained within that
+	  memory (e.g., private keys) cannot be found by other guests that
+	  may be running on the machine. Most people will want to say Y here.
+	  If security is not a concern then you may increase performance by
+	  saying N.
+	  If in doubt, say yes.
+
+config XEN_DEV_EVTCHN
+	tristate "Xen /dev/xen/evtchn device"
+	default PARAVIRT_XEN || XEN_PRIVILEGED_GUEST || m
+	help
+	  The evtchn driver allows a userspace process to triger event
+	  channels and to receive notification of an event channel
+	  firing.
+	  If in doubt, say yes.
+
+config PARAVIRT_XEN_BACKEND
+	bool "Backend driver support"
+	depends on XEN_DOM0
+	default y
+	help
+	  Support for backend device drivers that provide I/O services
+	  to other virtual machines.
+
+config XENFS
+	tristate "Xen filesystem"
+	depends on PARAVIRT_XEN
+	select XEN_PRIVCMD
+	default y
+	help
+	  The xen filesystem provides a way for domains to share
+	  information with each other and with the hypervisor.
+	  For example, by reading and writing the "xenbus" file, guests
+	  may pass arbitrary information to the initial domain.
+	  If in doubt, say yes.
+
+config XEN_COMPAT_XENFS
+       bool "Create compatibility mount point /proc/xen"
+       depends on XENFS
+       default y
+       help
+         The old xenstore userspace tools expect to find "xenbus"
+         under /proc/xen, but "xenbus" is now found at the root of the
+         xenfs filesystem.  Selecting this causes the kernel to create
+         the compatibility mount point /proc/xen if it is running on
+         a xen platform.
+         If in doubt, say yes.
+
+config XEN_SYS_HYPERVISOR
+       bool "Create xen entries under /sys/hypervisor"
+       depends on SYSFS
+       select SYS_HYPERVISOR
+       default y
+       help
+         Create entries under /sys/hypervisor describing the Xen
+	 hypervisor environment.  When running native or in another
+	 virtual environment, /sys/hypervisor will still be present,
+	 but will have no xen contents.
+
+config XEN_XENBUS_FRONTEND
+	tristate
+
+config XEN_GNTDEV
+	tristate "userspace grant access device driver"
+	depends on PARAVIRT_XEN
+	default m
+	select MMU_NOTIFIER
+	help
+	  Allows userspace processes to use grants.
+
+config XEN_GRANT_DEV_ALLOC
+	tristate "User-space grant reference allocator driver"
+	depends on PARAVIRT_XEN
+	default m
+	help
+	  Allows userspace processes to create pages with access granted
+	  to other domains. This can be used to implement frontend drivers
+	  or as part of an inter-domain shared memory channel.
+
+config SWIOTLB_XEN
+	def_bool y
+	depends on PCI
+	select SWIOTLB
+
+config XEN_XENCOMM
+	bool
+
+config XEN_TMEM
+	bool
+	default y if (CLEANCACHE || FRONTSWAP)
+	help
+	  Shim to interface in-kernel Transcendent Memory hooks
+	  (e.g. cleancache and frontswap) to Xen tmem hypercalls.
+
+config XEN_PCIDEV_BACKEND
+	tristate "Xen PCI-device backend driver"
+	depends on PCI && ((X86 && PARAVIRT_XEN_BACKEND) || (XEN_PRIVILEGED_GUEST && XEN_BACKEND))
+	default XEN_BACKEND if XEN
+	default m
+	help
+	  The PCI device backend driver allows the kernel to export arbitrary
+	  PCI devices to other guests. If you select this to be a module, you
+	  will need to make sure no other driver has bound to the device(s)
+	  you want to make visible to other guests.
+
+	  The "hide" parameter (only applicable if backend driver is compiled
+	  into the kernel) allows you to bind the PCI devices to this module
+	  from the default device drivers. The argument is the list of PCI BDFs:
+	  xen-pciback.hide=(03:00.0)(04:00.0)
+
+	  If in doubt, say m.
+
+menu "PCI Backend Mode"
+	depends on XEN_PCIDEV_BACKEND
+
+config XEN_NR_GUEST_DEVICES
+	int "Number of guest devices"
+	range 0 4032 if 64BIT
+	range 0 960
+	default 256 if XEN_BACKEND
+	default 16
+	help
+	  Specify the total number of virtual devices (i.e. both frontend
+	  and backend) that you want the kernel to be able to service.
+
+choice
+	prompt "Default PCI backend mode"
+	default XEN_PCIDEV_BACKEND_DEFAULT_CONTROLLER if IA64
+	default XEN_PCIDEV_BACKEND_DEFAULT_VPCI
+
+config XEN_PCIDEV_BACKEND_DEFAULT_VPCI
+	bool "Virtual PCI"
+	select XEN_PCIDEV_BACKEND_VPCI
+
+config XEN_PCIDEV_BACKEND_DEFAULT_PASSTHROUGH
+	bool "Passthrough"
+	select XEN_PCIDEV_BACKEND_PASSTHROUGH
+
+config XEN_PCIDEV_BACKEND_DEFAULT_SLOT
+	bool "Slot"
+	select XEN_PCIDEV_BACKEND_SLOT
+
+config XEN_PCIDEV_BACKEND_DEFAULT_CONTROLLER
+	bool "Controller"
+	depends on IA64
+	select XEN_PCIDEV_BACKEND_CONTROLLER
+
+endchoice
+
+config XEN_PCIDEV_BACKEND_DEFAULT
+	string
+	default "vpci" if XEN_PCIDEV_BACKEND_DEFAULT_VPCI
+	default "passthrough" if XEN_PCIDEV_BACKEND_DEFAULT_PASSTHROUGH
+	default "slot" if XEN_PCIDEV_BACKEND_DEFAULT_SLOT
+	default "controller" if XEN_PCIDEV_BACKEND_DEFAULT_CONTROLLER
+
+config XEN_PCIDEV_BACKEND_VPCI
+	bool "Virtual PCI"
+	default X86
+	---help---
+	  This PCI Backend hides the true PCI topology and makes the frontend
+	  think there is a single PCI bus with only the exported devices on it.
+	  For example, a device at 03:05.0 will be re-assigned to 00:00.0. A
+	  second device at 02:1a.1 will be re-assigned to 00:01.1.
+
+	  If not the default, the parameter "mode=vpci" allows you to use this
+	  mode.
+
+config XEN_PCIDEV_BACKEND_PASSTHROUGH
+	bool "Passthrough"
+	---help---
+	  This PCI Backend provides a real view of the PCI topology to the
+	  frontend (for example, a device at 06:01.b will still appear at
+	  06:01.b to the frontend). This is similar to how Xen 2.0.x exposed
+	  PCI devices to its driver domains. This may be required for drivers
+	  which depend on finding their hardward in certain bus/slot
+	  locations.
+
+	  If not the default, the parameter "mode=passthrough" allows you to
+	  use this mode.
+
+config XEN_PCIDEV_BACKEND_SLOT
+	bool "Slot"
+	---help---
+	  This PCI Backend hides the true PCI topology and makes the frontend
+	  think there is a single PCI bus with only the exported devices on it.
+	  Contrary to the virtual PCI backend, a function becomes a new slot.
+	  For example, a device at 03:05.2 will be re-assigned to 00:00.0. A
+	  second device at 02:1a.1 will be re-assigned to 00:01.0.
+
+	  If not the default, the parameter "mode=slot" allows you to use this
+	  mode.
+
+config XEN_PCIDEV_BACKEND_CONTROLLER
+	bool "Controller"
+	depends on IA64
+	---help---
+	  This PCI backend virtualizes the PCI bus topology by providing a
+	  virtual bus per PCI root device.  Devices which are physically under
+	  the same root bus will appear on the same virtual bus.  For systems
+	  with complex I/O addressing, this is the only backend which supports
+	  extended I/O port spaces and MMIO translation offsets.  This backend
+	  also supports slot virtualization.  For example, a device at
+	  0000:01:02.1 will be re-assigned to 0000:00:00.0.  A second device
+	  at 0000:02:05.0 (behind a P2P bridge on bus 0000:01) will be
+	  re-assigned to 0000:00:01.0.  A third device at 0000:16:05.0 (under
+	  a different PCI root bus) will be re-assigned to 0000:01:00.0.
+
+	  If not the default, the parameter "mode=controller" allows you to
+	  use this mode.
+
+endmenu
+
+config XEN_PRIVCMD
+	tristate
+	depends on PARAVIRT_XEN || (XEN && PROC_FS)
+	default y if XEN
+	default m
+
+config XEN_ACPI_PROCESSOR
+	tristate "Xen ACPI processor"
+	depends on PARAVIRT_XEN && X86 && ACPI_PROCESSOR && CPU_FREQ
+	default m
+	help
+          This ACPI processor uploads Power Management information to the Xen
+	  hypervisor.
+
+	  To do that the driver parses the Power Management data and uploads
+	  said information to the Xen hypervisor. Then the Xen hypervisor can
+	  select the proper Cx and Pxx states. It also registers itslef as the
+	  SMM so that other drivers (such as ACPI cpufreq scaling driver) will
+	  not load.
+
+          To compile this driver as a module, choose M here: the module will be
+	  called xen_acpi_processor  If you do not know what to choose, select
+	  M here. If the CPUFREQ drivers are built in, select Y here.
+
+config XEN_VCPU_INFO_PLACEMENT
+	bool "Place shared vCPU info in per-CPU storage"
+#	depends on X86 && (XEN_COMPAT >= 0x00030101)
+	depends on X86
+	depends on !XEN_COMPAT_030002_AND_LATER
+	depends on !XEN_COMPAT_030004_AND_LATER
+	depends on !XEN_COMPAT_030100_AND_LATER
+	default SMP
+	---help---
+	  This allows faster access to the per-vCPU shared info
+	  structure.
+
+config XEN_ADVANCED_COMPRESSION
+	def_bool y
+#	depends on XEN && (XEN_UNPRIVILEGED_GUEST || X86) && (XEN_COMPAT >= 0x040000)
+	depends on XEN && (XEN_UNPRIVILEGED_GUEST || X86)
+	depends on !XEN_COMPAT_030002_AND_LATER
+	depends on !XEN_COMPAT_030004_AND_LATER
+	depends on !XEN_COMPAT_030100_AND_LATER
+	depends on !XEN_COMPAT_030200_AND_LATER
+	depends on !XEN_COMPAT_030300_AND_LATER
+	depends on !XEN_COMPAT_030400_AND_LATER
+
+endmenu
